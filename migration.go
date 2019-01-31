@@ -118,7 +118,7 @@ func (m *Migration) LogString() string {
 
 // Buffer buffers Body up to BufferSize.
 // Calling this function blocks. Call with goroutine.
-func (m *Migration) Buffer() error {
+func (m *Migration) Buffer(callback MigrationCallback) error {
 	if m.Body == nil {
 		return nil
 	}
@@ -130,6 +130,12 @@ func (m *Migration) Buffer() error {
 	// start reading from body, peek won't move the read pointer though
 	// poor man's solution?
 	b.Peek(int(m.BufferSize))
+
+	s := bufio.NewScanner(b)
+	s.Split(bufio.ScanWords)
+	for s.Scan() == true {
+		callback(s.Text())
+	}
 
 	m.FinishedBuffering = time.Now()
 

@@ -50,6 +50,9 @@ func (e ErrDirty) Error() string {
 	return fmt.Sprintf("Dirty database version %v. Fix and force version.", e.Version)
 }
 
+// MigrationCallback is a function for preprocessing migrations
+type MigrationCallback func(string) error
+
 type Migrate struct {
 	sourceName   string
 	sourceDrv    source.Driver
@@ -75,6 +78,10 @@ type Migrate struct {
 	// LockTimeout defaults to DefaultLockTimeout,
 	// but can be set per Migrate instance.
 	LockTimeout time.Duration
+
+	// Callback is used to preprocess all migrations before executing
+	// useful for variable injection
+	Callback MigrationCallback
 }
 
 // New returns a new Migrate instance from a source URL and a database URL.
@@ -131,6 +138,33 @@ func NewWithDatabaseInstance(sourceUrl string, databaseName string, databaseInst
 	m.sourceDrv = sourceDrv
 
 	m.databaseDrv = databaseInstance
+
+	return m, nil
+}
+
+// NewWithDatabaseInstanceCallback returns a new Migrate instance from a source URL
+// and an existing database instance. The source URL scheme is defined by each driver.
+// Use any string that can serve as an identifier during logging as databaseName.
+// You are responsible for closing the underlying database client if necessary.
+func NewWithDatabaseInstanceCallback(sourceURL string, databaseName string, databaseInstance database.Driver, callback MigrationCallback) (*Migrate, error) {
+	m := newCommon()
+
+	sourceName, err := schemeFromUrl(sourceURL)
+	if err != nil {
+		return nil, err
+	}
+	m.sourceName = sourceName
+
+	m.databaseName = databaseName
+
+	sourceDrv, err := source.Open(sourceURL)
+	if err != nil {
+		return nil, err
+	}
+	m.sourceDrv = sourceDrv
+
+	m.databaseDrv = databaseInstance
+	m.Callback = callback
 
 	return m, nil
 }
@@ -345,7 +379,7 @@ func (m *Migrate) Run(migration ...*Migration) error {
 			}
 
 			ret <- migr
-			go migr.Buffer()
+			go migr.Buffer(m.Callback)
 		}
 	}()
 
@@ -432,7 +466,7 @@ func (m *Migrate) read(from int, to int, ret chan<- interface{}) {
 			}
 
 			ret <- migr
-			go migr.Buffer()
+			go migr.Buffer(m.Callback)
 			from = int(firstVersion)
 		}
 
@@ -455,7 +489,7 @@ func (m *Migrate) read(from int, to int, ret chan<- interface{}) {
 			}
 
 			ret <- migr
-			go migr.Buffer()
+			go migr.Buffer(m.Callback)
 			from = int(next)
 		}
 
@@ -476,7 +510,7 @@ func (m *Migrate) read(from int, to int, ret chan<- interface{}) {
 					return
 				}
 				ret <- migr
-				go migr.Buffer()
+				go migr.Buffer(m.Callback)
 				return
 
 			} else if err != nil {
@@ -491,7 +525,7 @@ func (m *Migrate) read(from int, to int, ret chan<- interface{}) {
 			}
 
 			ret <- migr
-			go migr.Buffer()
+			go migr.Buffer(m.Callback)
 			from = int(prev)
 		}
 	}
@@ -539,7 +573,7 @@ func (m *Migrate) readUp(from int, limit int, ret chan<- interface{}) {
 			}
 
 			ret <- migr
-			go migr.Buffer()
+			go migr.Buffer(m.Callback)
 			from = int(firstVersion)
 			count++
 			continue
@@ -583,7 +617,7 @@ func (m *Migrate) readUp(from int, limit int, ret chan<- interface{}) {
 		}
 
 		ret <- migr
-		go migr.Buffer()
+		go migr.Buffer(m.Callback)
 		from = int(next)
 		count++
 	}
@@ -644,7 +678,7 @@ func (m *Migrate) readDown(from int, limit int, ret chan<- interface{}) {
 					return
 				}
 				ret <- migr
-				go migr.Buffer()
+				go migr.Buffer(m.Callback)
 				count++
 			}
 
@@ -665,7 +699,7 @@ func (m *Migrate) readDown(from int, limit int, ret chan<- interface{}) {
 		}
 
 		ret <- migr
-		go migr.Buffer()
+		go migr.Buffer(m.Callback)
 		from = int(prev)
 		count++
 	}
