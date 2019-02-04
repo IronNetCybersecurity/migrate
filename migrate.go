@@ -291,6 +291,36 @@ func (m *Migrate) Steps(n int) error {
 	return m.unlockErr(m.runMigrations(ret))
 }
 
+// ReRun forces a rerun of a specific migration version if it is valid
+// passinng 0 reruns the last migration
+func (m *Migrate) ReRun(version uint) error {
+	if err := m.lock(); err != nil {
+		return err
+	}
+
+	curVersion, dirty, err := m.databaseDrv.Version()
+	if err != nil {
+		return m.unlockErr(err)
+	}
+
+	if dirty {
+		return m.unlockErr(ErrDirty{curVersion})
+	}
+
+	if version == 0 {
+		version = uint(curVersion)
+	}
+
+	if curVersion < int(version) {
+		return ErrNilVersion
+	}
+
+	ret := make(chan interface{}, m.PrefetchMigrations)
+	go m.read(int(version)-1, int(version), ret)
+
+	return m.unlockErr(m.runMigrations(ret))
+}
+
 // Up looks at the currently active migration version
 // and will migrate all the way up (applying all up migrations).
 func (m *Migrate) Up() error {
