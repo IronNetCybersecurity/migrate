@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"time"
+	"bytes"
 )
 
 // DefaultBufferSize sets the in memory buffer size (in Bytes) for every
@@ -119,6 +120,7 @@ func (m *Migration) LogString() string {
 // Buffer buffers Body up to BufferSize.
 // Calling this function blocks. Call with goroutine.
 func (m *Migration) Buffer(callback MigrationCallback) error {
+	var err error
 	if m.Body == nil {
 		return nil
 	}
@@ -130,24 +132,27 @@ func (m *Migration) Buffer(callback MigrationCallback) error {
 	// start reading from body, peek won't move the read pointer though
 	// poor man's solution?
 	b.Peek(int(m.BufferSize))
-
-	s := bufio.NewScanner(b)
-	s.Split(bufio.ScanWords)
-	for s.Scan() == true {
-		callback(s.Text())
-	}
-
 	m.FinishedBuffering = time.Now()
 
-	// write to bufferWriter, this will block until
-	// something starts reading from m.Buffer
-	n, err := b.WriteTo(m.bufferWriter)
-	if err != nil {
-		return err
+	n := int64(0)
+	if callback != nil {
+		buf := new(bytes.Buffer)
+		buf.ReadFrom(b)
+		s := buf.String()
+		templated := callback(s)
+		io.WriteString(m.bufferWriter, templated)
+		n = int64(len(templated))
+	} else {
+		// write to bufferWriter, this will block until
+		// something starts reading from m.Buffer
+		n, err = b.WriteTo(m.bufferWriter)
+		if err != nil {
+			return err
+		}
 	}
 
-	m.FinishedReading = time.Now()
 	m.BytesRead = n
+	m.FinishedReading = time.Now()
 
 	// close bufferWriter so Buffer knows that there is no
 	// more data coming

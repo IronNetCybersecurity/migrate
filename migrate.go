@@ -51,7 +51,7 @@ func (e ErrDirty) Error() string {
 }
 
 // MigrationCallback is a function for preprocessing migrations
-type MigrationCallback func(string) error
+type MigrationCallback func(string) string
 
 type Migrate struct {
 	sourceName   string
